@@ -1,0 +1,22 @@
+#!/bin/zsh
+# A stand-in for Apple's `container` CLI that replays the test fixtures.
+# Lets you work on the UI without installing the runtime:
+#   CONTAINER_DESKTOP_CLI="$PWD/Scripts/fake-container" open "Container Desktop.app"
+# or enable the CONTAINER_DESKTOP_CLI variable in the scheme's Run options.
+F="${0:A:h}/../Packages/ContainerKit/Tests/ContainerKitTests/Fixtures"
+case "$1 $2" in
+  "system status") cat "$F/status.json" ;;
+  "system start"|"system stop") sleep 1 ;;
+  "list --all"|"ls --all") cat "$F/containers.json" ;;
+  "image list") cat "$F/images.json" ;;
+  "volume list") cat "$F/volumes.json" ;;
+  "network list") cat "$F/networks.json" ;;
+  "stats --no-stream") sleep 1; cat "$F/stats.json" ;;
+  "inspect "*) cat "$F/containers.json" | head -1 ;;
+  "logs "*)
+    for i in {1..40}; do echo "2026/11/21 12:00:$((i % 60)) [notice] worker process $((1000 + i)) started"; done
+    [[ "$*" == *--follow* ]] && while true; do sleep 2; echo "$(date '+%Y/%m/%d %H:%M:%S') GET / 200"; done ;;
+  "image pull"*) for p in 10 40 80 100; do echo "Fetching layers $p%"; sleep 0.3; done ;;
+  "run "*) sleep 1; echo "new-container" ;;
+  *) exit 0 ;;
+esac

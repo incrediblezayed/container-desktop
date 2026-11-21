@@ -1,0 +1,2 @@
+[{"configuration":{"creationDate":"2026-11-18T12:00:00Z","driver":"local","format":"ext4","labels":{},"name":"data","options":{},"sizeInBytes":536870912,"source":"/Users/me/Library/Application Support/com.apple.container/volumes/data/volume.img"},"id":"data"},
+{"name":"legacy","driver":"local","format":"ext4","source":"/x","createdAt":"2025-06-01T00:00:00Z","labels":{"com.apple.container.resource.anonymous":""}}]
