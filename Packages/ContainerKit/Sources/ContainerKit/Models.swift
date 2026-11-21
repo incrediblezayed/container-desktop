@@ -70,6 +70,11 @@ public struct ContainerSummary: Identifiable, Sendable, Hashable, Decodable {
     public var ports: [PortMapping]
     public var mounts: [Mount]
     public var networks: [NetworkAttachment]
+    /// Networks the container joins when it starts. `networks` only lists live
+    /// attachments, which are empty while the container is stopped.
+    public var configuredNetworks: [String]
+    /// Nameservers written into the container's resolv.conf when it was created.
+    public var dnsNameservers: [String]
     public var labels: [String: String]
     public var cpus: Int?
     public var memoryBytes: UInt64?
@@ -86,20 +91,24 @@ public struct ContainerSummary: Identifiable, Sendable, Hashable, Decodable {
         id: String, image: String, state: ContainerState, startedAt: Date? = nil, createdAt: Date? = nil,
         command: [String] = [], workingDirectory: String? = nil, environment: [String] = [],
         ports: [PortMapping] = [], mounts: [Mount] = [], networks: [NetworkAttachment] = [],
+        configuredNetworks: [String]? = nil, dnsNameservers: [String] = [],
         labels: [String: String] = [:], cpus: Int? = nil, memoryBytes: UInt64? = nil,
         platform: String? = nil, rosetta: Bool = false
     ) {
         self.id = id; self.image = image; self.state = state; self.startedAt = startedAt
         self.createdAt = createdAt; self.command = command; self.workingDirectory = workingDirectory
         self.environment = environment; self.ports = ports; self.mounts = mounts; self.networks = networks
+        self.configuredNetworks = configuredNetworks ?? networks.map(\.network)
+        self.dnsNameservers = dnsNameservers
         self.labels = labels; self.cpus = cpus; self.memoryBytes = memoryBytes; self.platform = platform
         self.rosetta = rosetta
     }
 
     private enum Keys: String, CodingKey { case id, configuration, status }
     private enum ConfigKeys: String, CodingKey {
-        case id, image, mounts, publishedPorts, labels, networks, initProcess, platform, resources, rosetta, creationDate
+        case id, image, mounts, publishedPorts, labels, networks, initProcess, platform, resources, rosetta, creationDate, dns
     }
+    private enum DNSKeys: String, CodingKey { case nameservers }
     private enum StatusKeys: String, CodingKey { case state, networks, startedDate }
     private enum ImageKeys: String, CodingKey { case reference }
     private enum ProcessKeys: String, CodingKey { case executable, arguments, environment, workingDirectory }
@@ -139,6 +148,9 @@ public struct ContainerSummary: Identifiable, Sendable, Hashable, Decodable {
         labels = config.lenient([String: String].self, forKey: .labels) ?? [:]
         ports = config.lenient([PortMapping].self, forKey: .publishedPorts) ?? []
         rosetta = config.lenient(Bool.self, forKey: .rosetta) ?? false
+        configuredNetworks = (config.lenient([ConfiguredNetwork].self, forKey: .networks) ?? []).compactMap(\.network)
+        dnsNameservers = (try? config.nestedContainer(keyedBy: DNSKeys.self, forKey: .dns))
+            .flatMap { $0.lenient([String].self, forKey: .nameservers) } ?? []
 
         if let process = try? config.nestedContainer(keyedBy: ProcessKeys.self, forKey: .initProcess) {
             let executable = process.lenient(String.self, forKey: .executable)
@@ -166,6 +178,8 @@ public struct ContainerSummary: Identifiable, Sendable, Hashable, Decodable {
 
         mounts = Self.decodeMounts(config)
     }
+
+    private struct ConfiguredNetwork: Decodable { var network: String? }
 
     private static func decodeAttachments(_ c: KeyedDecodingContainer<StatusKeys>, key: StatusKeys) -> [NetworkAttachment] {
         guard var list = try? c.nestedUnkeyedContainer(forKey: key) else { return [] }

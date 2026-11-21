@@ -29,7 +29,9 @@ Container Desktop adds the missing desktop experience. The plan is for it to bec
 | | |
 |---|---|
 | **Containers** | Start, stop, restart, kill and delete. Live CPU and memory in every row. Open a shell in Terminal, or a published port in the browser. |
-| **Details** | Ports, mounts, environment, labels and IP. Streaming logs with filtering, live CPU and memory charts, and raw `inspect`. |
+| **Compose projects** | Containers from `docker compose` are grouped by project, with totals for CPU, memory and ports. Start a whole project in `depends_on` order, waiting for health checks and one-shot jobs, or stop, restart and delete it in one click. Socktainer's DNS and BuildKit helpers are hidden unless you ask for them. |
+| **Details** | Ports, mounts, environment, labels and IP. Live CPU and memory charts, and raw `inspect`. |
+| **Logs** | ANSI colours, highlighted errors and warnings with counts, level and text filters, and merged logs for a whole project with a coloured prefix per service, like `docker compose logs`. Following pauses when you scroll up. The VM boot log is one click away. Copy or save to a file. |
 | **Run** | Image, name, command, ports, volumes (with a folder picker), environment, CPU and memory limits, network, `--rm` and Rosetta, all validated before anything runs. |
 | **Images** | Pull with live progress, run from an image, delete and prune. Runtime-internal images are hidden by default. |
 | **Volumes and networks** | Create and delete, and see which containers use each one. |

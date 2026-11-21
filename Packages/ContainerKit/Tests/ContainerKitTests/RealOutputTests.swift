@@ -37,6 +37,9 @@ struct RealOutputTests {
         let stopped = try #require(list.first { $0.id == "cd-stopped" })
         #expect(stopped.state == .stopped)
         #expect(stopped.networks.isEmpty)
+        // Live attachments vanish when stopped; the configuration still names the network.
+        #expect(stopped.configuredNetworks == ["default"])
+        #expect(web.configuredNetworks == ["cd-net"])
     }
 
     @Test func images() throws {

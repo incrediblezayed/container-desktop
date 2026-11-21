@@ -26,7 +26,7 @@ struct ContainerDetailView: View {
             Divider()
             switch tab {
             case .overview: OverviewTab(container: container)
-            case .logs: LogsTab(container: container)
+            case .logs: LogsView(sources: [LogSource(container: container)])
             case .stats: StatsTab(container: container)
             case .inspect: InspectTab(container: container)
             }
@@ -127,128 +127,6 @@ private struct OverviewTab: View {
             }
         }
         .formStyle(.grouped)
-    }
-}
-
-// MARK: - Logs
-
-@Observable
-@MainActor
-final class LogStream {
-    private(set) var lines: [String] = []
-    private(set) var isStreaming = false
-    private(set) var failure: String?
-    static let maxLines = 5_000
-    @ObservationIgnored private var task: Task<Void, Never>?
-
-    func start(_ stream: AsyncThrowingStream<String, Error>?) {
-        task?.cancel()
-        lines = []
-        failure = nil
-        guard let stream else { return }
-        isStreaming = true
-        task = Task { [weak self] in
-            var batch: [String] = []
-            var lastFlush = ContinuousClock.now
-            do {
-                for try await line in stream {
-                    batch.append(line)
-                    // Batch UI updates; a chatty container can emit thousands of lines a second.
-                    if batch.count >= 200 || ContinuousClock.now - lastFlush > .milliseconds(100) {
-                        self?.append(batch)
-                        batch.removeAll(keepingCapacity: true)
-                        lastFlush = .now
-                    }
-                }
-                self?.append(batch)
-            } catch {
-                self?.append(batch)
-                if !Task.isCancelled { self?.failure = error.localizedDescription }
-            }
-            self?.isStreaming = false
-        }
-    }
-
-    func stop() {
-        task?.cancel()
-        task = nil
-        isStreaming = false
-    }
-
-    func clear() { lines.removeAll() }
-
-    private func append(_ batch: [String]) {
-        guard !batch.isEmpty else { return }
-        lines.append(contentsOf: batch)
-        if lines.count > Self.maxLines { lines.removeFirst(lines.count - Self.maxLines) }
-    }
-}
-
-private struct LogsTab: View {
-    @Environment(AppModel.self) private var model
-    let container: ContainerSummary
-    @State private var stream = LogStream()
-    @State private var filter = ""
-    @State private var follow = true
-
-    private var visible: [(offset: Int, element: String)] {
-        let all = Array(stream.lines.enumerated())
-        return filter.isEmpty ? all : all.filter { $0.element.localizedCaseInsensitiveContains(filter) }
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                TextField("Filter", text: $filter)
-                    .textFieldStyle(.roundedBorder)
-                Toggle("Follow", isOn: $follow)
-                    .toggleStyle(.checkbox)
-                Button { stream.clear() } label: { Image(systemName: "trash") }
-                    .buttonStyle(.borderless)
-                    .help("Clear")
-                Button { copyAll() } label: { Image(systemName: "doc.on.doc") }
-                    .buttonStyle(.borderless)
-                    .help("Copy logs")
-            }
-            .padding(10)
-            Divider()
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(visible, id: \.offset) { item in
-                            Text(item.element.isEmpty ? " " : item.element)
-                                .font(.system(.callout, design: .monospaced))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
-                                .id(item.offset)
-                        }
-                    }
-                    .padding(10)
-                }
-                .overlay {
-                    if stream.lines.isEmpty {
-                        if let failure = stream.failure {
-                            ContentUnavailableView("Couldn't read logs", systemImage: "exclamationmark.triangle", description: Text(failure))
-                        } else if !stream.isStreaming {
-                            ContentUnavailableView("No output", systemImage: "text.alignleft")
-                        }
-                    }
-                }
-                .onChange(of: stream.lines.count) {
-                    if follow, let last = visible.last { proxy.scrollTo(last.offset, anchor: .bottom) }
-                }
-            }
-            .background(Color(nsColor: .textBackgroundColor))
-        }
-        .task(id: "\(container.id)-\(container.isRunning)") {
-            stream.start(model.logs(for: container, follow: container.isRunning))
-        }
-        .onDisappear { stream.stop() }
-    }
-
-    private func copyAll() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(visible.map(\.element).joined(separator: "\n"), forType: .string)
     }
 }
 

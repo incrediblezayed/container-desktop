@@ -17,7 +17,10 @@ public protocol ContainerEngine: Sendable {
     func delete(container id: String, force: Bool) async throws
     func run(_ spec: RunSpec) async throws -> String
     func stats() async throws -> [ContainerStatsSample]
-    func logs(container id: String, follow: Bool, tail: Int?) -> AsyncThrowingStream<String, Error>
+    func logs(container id: String, follow: Bool, tail: Int?, boot: Bool) -> AsyncThrowingStream<String, Error>
+    /// Runs a command inside a running container and returns its result without throwing
+    /// on a non-zero exit (health checks need the exit code).
+    func exec(container id: String, command: [String], timeout: Duration) async throws -> CommandResult
     /// Raw `inspect` output, pretty-printed, for the "Inspect" tab.
     func inspect(container id: String) async throws -> String
 
@@ -103,12 +106,17 @@ public struct CLIContainerEngine: ContainerEngine {
         try await list(["stats", "--no-stream", "--format", "json"], as: ContainerStatsSample.self, timeout: .seconds(20))
     }
 
-    public func logs(container id: String, follow: Bool, tail: Int?) -> AsyncThrowingStream<String, Error> {
+    public func logs(container id: String, follow: Bool, tail: Int?, boot: Bool = false) -> AsyncThrowingStream<String, Error> {
         var args = ["logs"]
+        if boot { args.append("--boot") }
         if follow { args.append("--follow") }
         if let tail { args += ["-n", String(tail)] }
         args.append(id)
         return runner.streamLines(args)
+    }
+
+    public func exec(container id: String, command: [String], timeout: Duration) async throws -> CommandResult {
+        try await runner.runAllowingFailure(["exec", id] + command, timeout: timeout)
     }
 
     public func inspect(container id: String) async throws -> String {
