@@ -26,7 +26,8 @@ struct VolumesView: View {
                         }
                     }
                     TableColumn("Format") { v in Text(v.format).foregroundStyle(.secondary) }.width(70)
-                    TableColumn("Size") { v in Text(Format.bytes(v.sizeBytes)).monospacedDigit() }.width(80)
+                    TableColumn("Used") { v in Text(Format.bytes(v.allocatedBytes())).monospacedDigit() }.width(80)
+                    TableColumn("Capacity") { v in Text(Format.bytes(v.sizeBytes)).monospacedDigit().foregroundStyle(.secondary) }.width(80)
                     TableColumn("Created") { v in Text(Format.relative(v.createdAt)).foregroundStyle(.secondary) }.width(110)
                     TableColumn("Used by") { v in
                         Text(model.containers.filter { $0.mounts.contains { $0.kind == "volume" && $0.source == v.name } }.map(\.id).joined(separator: ", "))

@@ -294,6 +294,16 @@ public struct VolumeSummary: Identifiable, Sendable, Hashable, Decodable {
 
     public var isAnonymous: Bool { labels["com.apple.container.resource.anonymous"] != nil }
 
+    /// Disk space the volume actually uses. Volumes are sparse disk images, so
+    /// `sizeBytes` (their capacity, 512 GiB by default) says little about real usage.
+    /// Reads the host file, so it only works when the app runs on the same Mac as the runtime.
+    public func allocatedBytes() -> UInt64? {
+        guard !source.isEmpty else { return nil }
+        let url = URL(fileURLWithPath: source)
+        guard let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey]) else { return nil }
+        return (values.totalFileAllocatedSize ?? values.fileAllocatedSize).map(UInt64.init)
+    }
+
     public init(name: String, driver: String = "local", format: String = "ext4", source: String = "", createdAt: Date? = nil, labels: [String: String] = [:], sizeBytes: UInt64? = nil) {
         self.name = name; self.driver = driver; self.format = format; self.source = source
         self.createdAt = createdAt; self.labels = labels; self.sizeBytes = sizeBytes

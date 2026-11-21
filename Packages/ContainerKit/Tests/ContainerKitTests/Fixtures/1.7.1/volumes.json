@@ -1,0 +1,15 @@
+[
+  {
+    "configuration": {
+      "creationDate": "2026-11-21T07:28:28Z",
+      "driver": "local",
+      "format": "ext4",
+      "labels": {},
+      "name": "cd-data",
+      "options": {},
+      "sizeInBytes": 549755813888,
+      "source": "/Users/me/Library/Application Support/com.apple.container/volumes/cd-data/volume.img"
+    },
+    "id": "cd-data"
+  }
+]

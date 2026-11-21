@@ -1,0 +1,212 @@
+[
+  {
+    "configuration": {
+      "capAdd": [],
+      "capDrop": [],
+      "creationDate": "2026-11-21T07:28:53Z",
+      "dns": {
+        "nameservers": [],
+        "options": [],
+        "searchDomains": []
+      },
+      "id": "cd-stopped",
+      "image": {
+        "descriptor": {
+          "digest": "sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf",
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "size": 9218
+        },
+        "reference": "docker.io/library/alpine:latest"
+      },
+      "initProcess": {
+        "arguments": [
+          "1"
+        ],
+        "environment": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        ],
+        "executable": "sleep",
+        "rlimits": [],
+        "supplementalGroups": [],
+        "terminal": false,
+        "user": {
+          "id": {
+            "gid": 0,
+            "uid": 0
+          }
+        },
+        "workingDirectory": "/"
+      },
+      "labels": {},
+      "mounts": [],
+      "networks": [
+        {
+          "network": "default",
+          "options": {
+            "hostname": "cd-stopped",
+            "mtu": 1280
+          }
+        }
+      ],
+      "platform": {
+        "architecture": "arm64",
+        "os": "linux",
+        "variant": "v8"
+      },
+      "publishedPorts": [],
+      "publishedSockets": [],
+      "readOnly": false,
+      "resources": {
+        "cpuOverhead": 1,
+        "cpus": 4,
+        "memoryInBytes": 1073741824
+      },
+      "rosetta": false,
+      "runtimeHandler": "container-runtime-linux",
+      "ssh": false,
+      "sysctls": {},
+      "useInit": false,
+      "virtualization": false
+    },
+    "id": "cd-stopped",
+    "status": {
+      "networks": [],
+      "state": "stopped"
+    }
+  },
+  {
+    "configuration": {
+      "capAdd": [],
+      "capDrop": [],
+      "creationDate": "2026-11-21T07:28:41Z",
+      "dns": {
+        "nameservers": [],
+        "options": [],
+        "searchDomains": []
+      },
+      "id": "cd-web",
+      "image": {
+        "descriptor": {
+          "digest": "sha256:fb4658584bd9a916ffb6f6e365f97c25cfdb2923801f551ea08356e695f14ff7",
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "size": 10333
+        },
+        "reference": "docker.io/library/nginx:alpine"
+      },
+      "initProcess": {
+        "arguments": [
+          "nginx",
+          "-g",
+          "daemon off;"
+        ],
+        "environment": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "DEMO=1",
+          "PKG_RELEASE=1",
+          "DYNPKG_RELEASE=1",
+          "NGINX_VERSION=1.31.9",
+          "ACME_VERSION=0.4.2",
+          "NJS_VERSION=1.0.2",
+          "NJS_RELEASE=1"
+        ],
+        "executable": "/docker-entrypoint.sh",
+        "rlimits": [],
+        "supplementalGroups": [],
+        "terminal": false,
+        "user": {
+          "id": {
+            "gid": 0,
+            "uid": 0
+          }
+        },
+        "workingDirectory": "/"
+      },
+      "labels": {
+        "app": "demo"
+      },
+      "mounts": [
+        {
+          "destination": "/data",
+          "options": [],
+          "source": "/Users/me/Library/Application Support/com.apple.container/volumes/cd-data/volume.img",
+          "type": {
+            "volume": {
+              "cache": {
+                "on": {}
+              },
+              "format": "ext4",
+              "name": "cd-data",
+              "sync": {
+                "fsync": {}
+              }
+            }
+          }
+        },
+        {
+          "destination": "/usr/share/nginx/html",
+          "options": [
+            "ro"
+          ],
+          "source": "/Users/me/site",
+          "type": {
+            "virtiofs": {}
+          }
+        }
+      ],
+      "networks": [
+        {
+          "network": "cd-net",
+          "options": {
+            "hostname": "cd-web",
+            "mtu": 1280
+          }
+        }
+      ],
+      "platform": {
+        "architecture": "arm64",
+        "os": "linux",
+        "variant": "v8"
+      },
+      "publishedPorts": [
+        {
+          "containerPort": 80,
+          "count": 1,
+          "hostAddress": "0.0.0.0",
+          "hostPort": 8089,
+          "proto": "tcp"
+        }
+      ],
+      "publishedSockets": [],
+      "readOnly": false,
+      "resources": {
+        "cpuOverhead": 1,
+        "cpus": 2,
+        "memoryInBytes": 536870912
+      },
+      "rosetta": false,
+      "runtimeHandler": "container-runtime-linux",
+      "ssh": false,
+      "stopSignal": "SIGQUIT",
+      "sysctls": {},
+      "useInit": false,
+      "virtualization": false
+    },
+    "id": "cd-web",
+    "status": {
+      "networks": [
+        {
+          "hostname": "cd-web",
+          "ipv4Address": "192.168.65.2/24",
+          "ipv4Gateway": "192.168.65.1",
+          "ipv6Address": "fddd:f6ec:ca1d:1ea8:f017:78ff:feca:c25c/64",
+          "macAddress": "f2:17:78:ca:c2:5c",
+          "mtu": 1280,
+          "network": "cd-net",
+          "variant": "reserved"
+        }
+      ],
+      "startedDate": "2026-11-21T07:28:42Z",
+      "state": "running"
+    }
+  }
+]

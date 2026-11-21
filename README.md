@@ -64,6 +64,11 @@ swift test --package-path Packages/ContainerKit
 open -n --env CONTAINER_DESKTOP_CLI="$PWD/Scripts/fake-container" "path/to/Container Desktop.app"
 ```
 
+### Troubleshooting
+
+- **A published port (`-p 8080:80`) hangs or resets, but the container's own IP works.** macOS is blocking the runtime's port forwarder. Turn on `container-runtime-linux` under *System Settings → Privacy & Security → Local Network*, then restart the container. See [apple/container#2029](https://github.com/apple/container/issues/2029).
+- **`container system start` sits silently for minutes the first time.** It's downloading the Linux kernel (about 680 MB) without showing progress. Let it finish. If it was interrupted, run `container system kernel set --recommended`.
+
 ## Docker compatibility with Socktainer
 
 [Socktainer](https://github.com/socktainer/socktainer) serves a Docker Engine API (v1.51) socket on top of Apple's runtime. With it, `docker run`, `docker compose`, interactive `exec`, `cp`, builds and events work against Apple containers.
