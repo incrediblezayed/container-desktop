@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="ContainerDesktop/Assets.xcassets/AppIcon.appiconset/icon_128x128@2x.png" width="128" height="128" alt="Container Desktop icon">
+
 # Container Desktop
 
 **A native macOS desktop for Apple's open-source container runtime.**
@@ -41,6 +43,18 @@ Container Desktop adds the missing desktop experience. The plan is for it to bec
 - A Mac with Apple silicon
 - macOS 26 or later (required by the runtime)
 - Apple's `container` CLI. Install the signed package from its [releases page](https://github.com/apple/container/releases), then run `container system start`.
+
+### Download
+
+Get `Container-Desktop-<version>.zip` from the [latest release](https://github.com/incrediblezayed/container-desktop/releases/latest), unzip it and move **Container Desktop.app** to `/Applications`.
+
+Releases are ad-hoc signed and **not notarized yet**, so macOS blocks the first launch. Either open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**, or clear the quarantine flag:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Container Desktop.app"
+```
+
+Each release lists the zip's SHA-256 so you can check the download with `shasum -a 256`.
 
 ### Build and run
 
