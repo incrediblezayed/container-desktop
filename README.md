@@ -50,11 +50,7 @@ Container Desktop adds the missing desktop experience. The plan is for it to bec
 
 Get `Container-Desktop-<version>.zip` from the [latest release](https://github.com/incrediblezayed/container-desktop/releases/latest), unzip it and move **Container Desktop.app** to `/Applications`.
 
-Releases are ad-hoc signed and **not notarized yet**, so macOS blocks the first launch. Either open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**, or clear the quarantine flag:
-
-```sh
-xattr -dr com.apple.quarantine "/Applications/Container Desktop.app"
-```
+Releases are signed with a Developer ID and notarized by Apple, so the app opens normally.
 
 Each release lists the zip's SHA-256 so you can check the download with `shasum -a 256`.
 
