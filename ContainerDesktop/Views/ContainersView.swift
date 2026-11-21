@@ -35,6 +35,7 @@ struct ContainersView: View {
                         .frame(minWidth: 420)
                     if let selected {
                         ContainerDetailView(container: selected)
+                            .environment(model) // HSplitView panes are separate AppKit hosts
                             .id(selected.id)
                             .frame(minWidth: 360, idealWidth: 440)
                     }
@@ -94,13 +95,13 @@ struct ContainersView: View {
             }
             .width(min: 80, ideal: 120)
             TableColumn("") { c in
-                RowActions(container: c, onDelete: { pendingDelete = c })
+                RowActions(model: model, container: c, onDelete: { pendingDelete = c })
             }
             .width(70)
         }
         .contextMenu(forSelectionType: ContainerSummary.ID.self) { ids in
             if let id = ids.first, let c = model.containers.first(where: { $0.id == id }) {
-                ContainerMenuItems(container: c, onDelete: { pendingDelete = c })
+                ContainerMenuItems(model: model, container: c, onDelete: { pendingDelete = c })
             }
         } primaryAction: { ids in
             model.selectedContainerID = ids.first
@@ -108,8 +109,11 @@ struct ContainersView: View {
     }
 }
 
+/// Table cells and context menus are hosted by AppKit, which doesn't reliably carry
+/// SwiftUI's environment into them (rows created during an update crashed with
+/// "No Observable object of type AppModel found"), so they take the model explicitly.
 private struct RowActions: View {
-    @Environment(AppModel.self) private var model
+    let model: AppModel
     let container: ContainerSummary
     let onDelete: () -> Void
 
@@ -131,7 +135,7 @@ private struct RowActions: View {
 }
 
 struct ContainerMenuItems: View {
-    @Environment(AppModel.self) private var model
+    let model: AppModel
     let container: ContainerSummary
     let onDelete: () -> Void
 
