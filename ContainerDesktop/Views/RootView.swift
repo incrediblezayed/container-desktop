@@ -52,6 +52,7 @@ struct MainSplitView: View {
             case .volumes: VolumesView()
             case .networks: NetworksView()
             case .system: SystemView()
+            case .agents: AgentsView()
             }
         }
     }

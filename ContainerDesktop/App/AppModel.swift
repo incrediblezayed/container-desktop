@@ -11,7 +11,7 @@ struct UserFacingError: Identifiable, Equatable {
 }
 
 enum Section: String, CaseIterable, Identifiable, Hashable {
-    case containers, images, volumes, networks, system
+    case containers, images, volumes, networks, system, agents
     var id: String { rawValue }
 
     var title: String {
@@ -21,6 +21,7 @@ enum Section: String, CaseIterable, Identifiable, Hashable {
         case .volumes: "Volumes"
         case .networks: "Networks"
         case .system: "System"
+        case .agents: "AI Agents"
         }
     }
 
@@ -31,6 +32,7 @@ enum Section: String, CaseIterable, Identifiable, Hashable {
         case .volumes: "externaldrive"
         case .networks: "network"
         case .system: "cpu"
+        case .agents: "sparkles"
         }
     }
 }
@@ -90,6 +92,7 @@ final class AppModel {
         #if DEBUG
         // UI checks without driving the mouse: `--args -debugSelect project:<name>`.
         selectedContainerID = UserDefaults.standard.string(forKey: "debugSelect")
+        if let name = UserDefaults.standard.string(forKey: "debugSection"), let section = Section(rawValue: name) { self.section = section }
         #endif
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -248,14 +251,17 @@ final class AppModel {
 
     // MARK: Container actions
 
+    /// Shared with the MCP server, so agents and buttons start things the same way.
+    private var controller: ProjectController? { engine.map { ProjectController(engine: $0) } }
+
     func start(_ container: ContainerSummary) async {
-        guard let engine else { return }
-        await perform(container.id, title: "Couldn't start \(container.id)") { try await Self.start(container, engine: engine) }
+        guard let controller else { return }
+        await perform(container.id, title: "Couldn't start \(container.id)") { try await controller.start(container) }
     }
 
     func stop(_ container: ContainerSummary) async {
-        guard let engine else { return }
-        await perform(container.id, title: "Couldn't stop \(container.id)") { try await Self.stop(container, engine: engine) }
+        guard let controller else { return }
+        await perform(container.id, title: "Couldn't stop \(container.id)") { try await controller.stop(container) }
     }
 
     func kill(_ container: ContainerSummary) async {
@@ -264,11 +270,8 @@ final class AppModel {
     }
 
     func restart(_ container: ContainerSummary) async {
-        guard let engine else { return }
-        await perform(container.id, title: "Couldn't restart \(container.id)") {
-            if container.isRunning { try await Self.stop(container, engine: engine) }
-            try await Self.start(container, engine: engine)
-        }
+        guard let controller else { return }
+        await perform(container.id, title: "Couldn't restart \(container.id)") { try await controller.restart(container) }
     }
 
     func delete(_ container: ContainerSummary) async {
@@ -311,140 +314,98 @@ final class AppModel {
 
     // MARK: Compose projects
 
-    /// Starts a project the way `docker compose start` would: Socktainer's DNS helper first
-    /// (service names resolve through it), then services in `depends_on` order, waiting for
-    /// health checks and one-shot jobs that later services depend on.
+    /// Starts a project the way `docker compose start` would; see `ProjectController`.
     func startProject(_ project: ComposeProject) async {
-        guard let engine else { return }
-        if project.helpers.contains(where: { $0.labels["socktainer.role"] == "dns" }), !Socktainer.isRunning() {
-            report("Couldn't start \(project.name)", ProjectError.socktainerNotRunning)
-            return
-        }
-        await performProject(project, title: "Couldn't start \(project.name)") { model in
-            for helper in project.helpers where !helper.isRunning {
-                try await engine.start(container: helper.id)
-            }
-            await model.refreshContainers()
-            if let current = model.project(named: project.name) {
-                let stale = current.servicesWithStaleDNS()
-                if !stale.isEmpty {
-                    throw ProjectError.dnsMoved(project: project.name, services: stale.map(\.displayName), command: Self.recreateCommand(for: current))
-                }
-            }
-            for stage in project.startStages() {
-                let toStart = stage.filter { !$0.isRunning && !$0.isOneOff }
-                try await withThrowingTaskGroup(of: Void.self) { group in
-                    for c in toStart { group.addTask { try await Self.start(c, engine: engine) } }
-                    try await group.waitForAll()
-                }
-                await model.refreshContainers()
-                for c in stage where !c.isOneOff {
-                    switch project.requiredCondition(for: c.displayName) {
-                    case .healthy: try await Self.waitUntilHealthy(c, engine: engine)
-                    case .completedSuccessfully: try await Self.waitUntilExited(c, engine: engine)
-                    default: break
-                    }
-                }
-            }
+        guard let controller else { return }
+        await performProject(project, title: "Couldn't start \(project.name)") { refresh in
+            try await controller.start(project, afterStage: refresh)
         }
     }
 
-    /// Stops services in reverse dependency order. Socktainer's DNS helper keeps running:
-    /// services have its IP baked into resolv.conf, and a restarted helper never gets that
-    /// IP back, so stopping it would break name resolution for the whole project.
     func stopProject(_ project: ComposeProject) async {
-        guard let engine else { return }
+        guard let controller else { return }
         await performProject(project, title: "Couldn't stop \(project.name)") { _ in
-            for stage in project.startStages().reversed() {
-                try await withThrowingTaskGroup(of: Void.self) { group in
-                    for c in stage where c.isRunning { group.addTask { try await Self.stop(c, engine: engine) } }
-                    try await group.waitForAll()
-                }
-            }
+            try await controller.stop(project)
         }
     }
 
     func restartProject(_ project: ComposeProject) async {
-        await stopProject(project)
-        if let fresh = self.project(named: project.name) { await startProject(fresh) }
+        guard let controller else { return }
+        await performProject(project, title: "Couldn't restart \(project.name)") { refresh in
+            try await controller.restart(project, afterStage: refresh)
+        }
     }
 
-    /// Deletes the project's containers. Volumes, networks and Socktainer's helpers stay, as
-    /// with `docker compose rm`; `docker compose down` removes the rest.
-    func deleteProject(_ project: ComposeProject) async {
-        guard let engine else { return }
+    /// Deletes the project's containers, and with `removeVolumes` the volumes only it uses.
+    func deleteProject(_ project: ComposeProject, removeVolumes: Bool = false) async {
+        guard let controller else { return }
         await performProject(project, title: "Couldn't delete \(project.name)") { _ in
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                for c in project.services { group.addTask { try await engine.delete(container: c.id, force: c.isRunning) } }
-                try await group.waitForAll()
-            }
+            try await controller.delete(project, removeVolumes: removeVolumes)
         }
         if selectedContainerID == project.id { selectedContainerID = nil }
     }
 
     private func performProject(_ project: ComposeProject, title: String,
-                                _ action: @MainActor (AppModel) async throws -> Void) async {
+                                _ action: (_ refresh: @escaping @Sendable () async -> Void) async throws -> Void) async {
         let ids = [project.id] + project.services.map(\.id) + project.helpers.map(\.id)
         busy.formUnion(ids)
         defer { busy.subtract(ids) }
-        do { try await action(self) } catch { report(title, error) }
+        do {
+            try await action { [weak self] in await self?.refreshContainers() }
+        } catch {
+            report(title, error)
+        }
         await refreshAll()
-    }
-
-    /// Socktainer registers a container's DNS names only when it starts the container itself,
-    /// so its containers go through its API while it runs; everything else uses the CLI.
-    nonisolated static func start(_ c: ContainerSummary, engine: any ContainerEngine) async throws {
-        if c.isSocktainerManaged, Socktainer.isRunning() {
-            try await Socktainer.start(container: c.id)
-        } else {
-            try await engine.start(container: c.id)
-        }
-    }
-
-    nonisolated static func stop(_ c: ContainerSummary, engine: any ContainerEngine) async throws {
-        if c.isSocktainerManaged, Socktainer.isRunning() {
-            try await Socktainer.stop(container: c.id)
-        } else {
-            try await engine.stop(container: c.id)
-        }
-    }
-
-    /// The Compose command that recreates a project with the same files it was created from.
-    static func recreateCommand(for project: ComposeProject) -> String {
-        var parts = ["docker", "compose", "-p", project.name]
-        for file in project.configFiles { parts += ["-f", TerminalLauncher.shellQuote(file)] }
-        parts += ["up", "-d", "--force-recreate"]
-        let command = parts.joined(separator: " ")
-        guard let dir = project.workingDirectory else { return command }
-        return "cd \(TerminalLauncher.shellQuote(dir)) && " + command
-    }
-
-    /// Runs the service's own health check (from Socktainer's label) until it passes.
-    private static func waitUntilHealthy(_ c: ContainerSummary, engine: any ContainerEngine) async throws {
-        guard let check = c.healthCheck, let command = check.command else { return }
-        let attempts = min(max(check.retries ?? 30, 1), 120)
-        for _ in 0..<attempts {
-            let result = try? await engine.exec(container: c.id, command: command, timeout: check.timeoutDuration)
-            if result?.exitCode == 0 { return }
-            try await Task.sleep(for: check.intervalDuration)
-        }
-        throw ProjectError.unhealthy(c.displayName)
-    }
-
-    /// Waits for a one-shot service (a migration, a bucket setup) to finish.
-    private static func waitUntilExited(_ c: ContainerSummary, engine: any ContainerEngine) async throws {
-        let deadline = ContinuousClock.now + .seconds(300)
-        while ContinuousClock.now < deadline {
-            let list = try await engine.listContainers()
-            if list.first(where: { $0.id == c.id })?.isRunning != true { return }
-            try await Task.sleep(for: .seconds(1))
-        }
-        throw ProjectError.didNotFinish(c.displayName)
     }
 
     func inspect(_ container: ContainerSummary) async -> String {
         guard let engine else { return "" }
         do { return try await engine.inspect(container: container.id) } catch { return error.localizedDescription }
+    }
+
+    // MARK: Updates
+
+    /// Newest releases of the runtime pieces, checked at most every few hours.
+    private(set) var latestRuntime: Updates.Release?
+    private(set) var latestSocktainer: Updates.Release?
+    private(set) var socktainerVersion: String?
+    @ObservationIgnored private var lastUpdateCheck: Date?
+
+    var cliURL: URL? { (engine as? CLIContainerEngine)?.runner.executableURL }
+
+    var runtimeUpdateAvailable: Bool {
+        guard let latest = latestRuntime?.version, let installed = status?.clientVersion else { return false }
+        return Updates.isNewer(latest, than: installed) == true
+    }
+
+    var socktainerUpdateAvailable: Bool {
+        guard let latest = latestSocktainer?.version, let installed = socktainerVersion else { return false }
+        return Updates.isNewer(latest, than: installed) == true
+    }
+
+    func checkForUpdates(force: Bool = false) async {
+        socktainerVersion = Socktainer.isRunning() ? try? await Socktainer.version() : nil
+        if !force, let last = lastUpdateCheck, Date().timeIntervalSince(last) < 6 * 3600 { return }
+        lastUpdateCheck = Date()
+        async let runtime = try? Updates.latestRelease(of: Updates.containerRepository)
+        async let socktainer = try? Updates.latestRelease(of: Updates.socktainerRepository)
+        if let runtime = await runtime { latestRuntime = runtime }
+        if let socktainer = await socktainer { latestSocktainer = socktainer }
+    }
+
+    /// Runs Apple's update script in Terminal, where it can ask for the admin password.
+    /// Containers stop while it runs; images, volumes and container definitions are kept.
+    func updateRuntime() {
+        guard let cli = cliURL else { return }
+        guard let script = Updates.containerUpdateScript(cli: cli) else {
+            if let url = latestRuntime?.url { NSWorkspace.shared.open(url) }
+            return
+        }
+        do {
+            try TerminalLauncher.open(command: ["/bin/zsh", "-c", Updates.containerUpdateCommand(cli: cli, script: script)], title: "Update container")
+        } catch {
+            report("Couldn't open Terminal", error)
+        }
     }
 
     // MARK: Images
@@ -510,28 +471,6 @@ final class AppModel {
         let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         self.error = UserFacingError(title: title, message: message)
     }
-}
-
-enum ProjectError: LocalizedError {
-    case unhealthy(String)
-    case didNotFinish(String)
-    case socktainerNotRunning
-    case dnsMoved(project: String, services: [String], command: String)
-
-    var errorDescription: String? {
-        switch self {
-        case .unhealthy(let service): "\(service) didn't pass its health check, so services that depend on it weren't started."
-        case .didNotFinish(let service): "\(service) was still running after 5 minutes, so services that wait for it weren't started."
-        case .dnsMoved(_, let services, let command):
-            "Socktainer's DNS server for this project came back on a new address, so \(services.joined(separator: ", ")) can't look up other services by name. Recreate the containers; volumes are kept:\n\n\(command)"
-        case .socktainerNotRunning: "This project was created through Socktainer, and its services find each other by name through Socktainer's DNS. Start Socktainer, then try again."
-        }
-    }
-}
-
-extension ContainerSummary {
-    /// Containers from `docker compose run`, which a project start shouldn't bring back.
-    var isOneOff: Bool { labels["com.docker.compose.oneoff"]?.lowercased() == "true" }
 }
 
 struct StatsPoint: Identifiable, Hashable {

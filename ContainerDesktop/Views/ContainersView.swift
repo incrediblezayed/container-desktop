@@ -110,8 +110,17 @@ struct ContainersView: View {
             Button("Delete \(project.services.count) Containers", role: .destructive) {
                 Task { await model.deleteProject(project) }
             }
-        } message: { _ in
-            Text("Running services are stopped first. Volumes and networks are kept, like `docker compose rm`. Run `docker compose up` to recreate them.")
+            if !project.volumeNames.isEmpty {
+                Button("Delete Containers and \(project.volumeNames.count) Volumes", role: .destructive) {
+                    Task { await model.deleteProject(project, removeVolumes: true) }
+                }
+            }
+        } message: { project in
+            if project.volumeNames.isEmpty {
+                Text("Running services are stopped first. Networks are kept. Run `docker compose up` to recreate the containers.")
+            } else {
+                Text("Running services are stopped first. Deleting only the containers keeps your data in \(project.volumeNames.joined(separator: ", ")), like `docker compose rm`; `docker compose up` brings them back. Deleting the volumes too erases that data, like `docker compose down -v`. Volumes other containers still use are kept.")
+            }
         }
     }
 

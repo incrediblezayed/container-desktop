@@ -1,7 +1,7 @@
 import ContainerKit
 import SwiftUI
 
-@main
+/// Launched through `Main`, which hands `--mcp` launches to the MCP server instead.
 struct ContainerDesktopApp: App {
     @State private var model = AppModel()
 
@@ -29,6 +29,14 @@ struct ContainerDesktopApp: App {
                 }
             }
         }
+
+        WindowGroup("Logs", id: "logs", for: LogWindowTarget.self) { $target in
+            if let target {
+                LogWindow(target: target)
+                    .environment(model)
+            }
+        }
+        .defaultSize(width: 1000, height: 640)
 
         MenuBarExtra {
             MenuBarContent()

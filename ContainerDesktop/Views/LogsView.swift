@@ -9,6 +9,31 @@ struct LogSource: Hashable {
     var container: ContainerSummary
 }
 
+/// How a merged log shows which service printed each line.
+enum LogColorStyle: String, CaseIterable, Identifiable {
+    case band, text, prefix
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .band: "Coloured Band"
+        case .text: "Coloured Text"
+        case .prefix: "Coloured Name Only"
+        }
+    }
+}
+
+/// What a separate log window shows. Containers are looked up by ID when it opens, so the
+/// window follows them through restarts.
+struct LogWindowTarget: Codable, Hashable {
+    struct Entry: Codable, Hashable {
+        var id: String
+        var name: String?
+    }
+    var title: String
+    var entries: [Entry]
+    var fullScreen = false
+}
+
 // MARK: - Stream
 
 @Observable
@@ -121,7 +146,10 @@ final class LogStream {
 
 struct LogsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     let sources: [LogSource]
+    /// True inside a separate log window, which has nothing further to open.
+    var isWindow = false
 
     enum LevelFilter: String, CaseIterable, Identifiable {
         case all = "All levels", warnings = "Warnings and errors", errors = "Errors only"
@@ -138,13 +166,17 @@ struct LogsView: View {
     @State private var stream: LogStream
     @State private var filter = ""
     @State private var levelFilter = LevelFilter.all
-    @State private var sourceFilter: String?
+    /// Services switched off in the service menu; everything else shows.
+    @State private var hiddenSources: Set<String> = []
+    @AppStorage("logFilterRegex") private var useRegex = false
     @State private var follow = true
     @State private var wrap = true
     @State private var bootLog = false
+    @AppStorage("logColorStyle") private var colorStyle = LogColorStyle.band
 
-    init(sources: [LogSource]) {
+    init(sources: [LogSource], isWindow: Bool = false) {
         self.sources = sources
+        self.isWindow = isWindow
         _stream = State(initialValue: LogStream(maxLines: sources.count > 1 ? 10_000 : 5_000))
     }
 
@@ -152,12 +184,41 @@ struct LogsView: View {
     private var anyRunning: Bool { sources.contains { $0.container.isRunning } }
     private var prefixWidth: Int { sources.compactMap(\.name).map(\.count).max() ?? 0 }
 
-    private var visible: [LogLine] {
-        stream.lines.filter { line in
-            (sourceFilter == nil || line.source == sourceFilter)
-                && levelFilter.allows(line.level)
-                && (filter.isEmpty || line.text.localizedCaseInsensitiveContains(filter))
+    /// Colours follow the order of services, so no two services in a project share one.
+    private var sourceColors: [String: Color] {
+        var colors: [String: Color] = [:]
+        for (index, name) in sources.compactMap(\.name).enumerated() where colors[name] == nil {
+            colors[name] = LogColors.source(index: index)
         }
+        return colors
+    }
+
+    private var windowTarget: LogWindowTarget {
+        let title = isMerged
+            ? "\(sources.first?.container.composeProject ?? "Containers") — Logs"
+            : "\(sources.first?.container.id ?? "") — Logs"
+        return LogWindowTarget(title: title, entries: sources.map { .init(id: $0.container.id, name: $0.name) })
+    }
+
+    private var sourceNames: [String] { sources.compactMap(\.name) }
+
+    /// Nil when the field is empty or the pattern doesn't compile (the field turns red).
+    private var matcher: LogMatcher? { try? LogMatcher.make(filter, regex: useRegex) }
+    private var patternIsInvalid: Bool { useRegex && !filter.isEmpty && matcher == nil }
+
+    private func visible(using matcher: LogMatcher?) -> [LogLine] {
+        stream.lines.filter { line in
+            (hiddenSources.isEmpty || !hiddenSources.contains(line.source ?? ""))
+                && levelFilter.allows(line.level)
+                && (matcher?.matches(line.text) ?? true)
+        }
+    }
+
+    private var serviceMenuTitle: String {
+        let shown = sourceNames.filter { !hiddenSources.contains($0) }
+        if shown.count == sourceNames.count { return "All services" }
+        if shown.isEmpty { return "No services" }
+        return shown.count <= 2 ? shown.joined(separator: ", ") : "\(shown.count) services"
     }
 
     /// Restart the streams when what we stream from changes.
@@ -166,15 +227,18 @@ struct LogsView: View {
     }
 
     var body: some View {
-        let visible = visible
+        let matcher = matcher
+        let visible = visible(using: matcher)
+        let colors = sourceColors
         VStack(spacing: 0) {
             toolbar
             Divider()
             ScrollViewReader { proxy in
                 ScrollView(wrap ? .vertical : [.vertical, .horizontal]) {
-                    LazyVStack(alignment: .leading, spacing: 1) {
+                    LazyVStack(alignment: .leading, spacing: isMerged && colorStyle == .band ? 0 : 1) {
                         ForEach(visible) { line in
-                            LogLineRow(line: line, highlight: filter, prefixWidth: isMerged ? prefixWidth : 0, wrap: wrap)
+                            LogLineRow(line: line, matcher: matcher, prefixWidth: isMerged ? prefixWidth : 0, wrap: wrap,
+                                       sourceColor: line.source.flatMap { colors[$0] }, style: colorStyle)
                                 .id(line.id)
                         }
                     }
@@ -218,29 +282,71 @@ struct LogsView: View {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            TextField("Filter", text: $filter)
+            TextField(useRegex ? "Regular expression" : "Filter", text: $filter)
                 .textFieldStyle(.roundedBorder)
+                .font(useRegex ? .body.monospaced() : .body)
                 .frame(minWidth: 100)
-            if isMerged {
-                Picker("Service", selection: $sourceFilter) {
-                    Text("All services").tag(String?.none)
-                    ForEach(sources.compactMap(\.name), id: \.self) { Text($0).tag(String?.some($0)) }
+                .overlay {
+                    if patternIsInvalid { RoundedRectangle(cornerRadius: 5).stroke(.red, lineWidth: 1.5) }
                 }
-                .labelsHidden()
+                .help(patternIsInvalid ? "This isn't a valid regular expression" : "Filter lines")
+            Toggle(isOn: $useRegex) { Text(".*").font(.body.monospaced().bold()) }
+                .toggleStyle(.button)
+                .help("Use a regular expression, e.g. error|fatal or timeout after \\d+ms")
+            if isMerged {
+                Menu(serviceMenuTitle) {
+                    ForEach(sourceNames, id: \.self) { name in
+                        Toggle(name, isOn: Binding(
+                            get: { !hiddenSources.contains(name) },
+                            set: { shown in
+                                if shown { hiddenSources.remove(name) } else { hiddenSources.insert(name) }
+                            }))
+                    }
+                    Divider()
+                    Button("Show All") { hiddenSources = [] }
+                        .disabled(hiddenSources.isEmpty)
+                    Menu("Show Only") {
+                        ForEach(sourceNames, id: \.self) { name in
+                            Button(name) { hiddenSources = Set(sourceNames).subtracting([name]) }
+                        }
+                    }
+                }
                 .fixedSize()
+                .help("Choose which services to show")
             }
             Picker("Level", selection: $levelFilter) {
                 ForEach(LevelFilter.allCases) { Text($0.rawValue).tag($0) }
             }
             .labelsHidden()
             .fixedSize()
+            if !isWindow {
+                Button { openWindow(id: "logs", value: windowTarget) } label: {
+                    Image(systemName: "macwindow.badge.plus")
+                }
+                .buttonStyle(.borderless)
+                .help("Open these logs in a new window")
+            }
             Menu {
                 Toggle("Wrap Lines", isOn: $wrap)
+                if isMerged {
+                    Picker("Show Services As", selection: $colorStyle) {
+                        ForEach(LogColorStyle.allCases) { Text($0.title).tag($0) }
+                    }
+                }
                 if !isMerged {
                     Toggle("Show VM Boot Log", isOn: $bootLog)
                 }
+                if !isWindow {
+                    Divider()
+                    Button("Open in New Window") { openWindow(id: "logs", value: windowTarget) }
+                    Button("Open in Full Screen") {
+                        var target = windowTarget
+                        target.fullScreen = true
+                        openWindow(id: "logs", value: target)
+                    }
+                }
                 Divider()
-                Button("Copy Visible Lines") { copy(visible) }
+                Button("Copy Visible Lines") { copy(visible(using: matcher)) }
                 Button("Save Logs…") { save() }
                 Divider()
                 Button("Clear") { stream.clear() }
@@ -324,15 +430,18 @@ struct LogsView: View {
 
 private struct LogLineRow: View {
     let line: LogLine
-    let highlight: String
+    let matcher: LogMatcher?
     let prefixWidth: Int
     let wrap: Bool
+    var sourceColor: Color?
+    var style: LogColorStyle = .prefix
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             if prefixWidth > 0, let source = line.source {
-                Text(source.padding(toLength: prefixWidth, withPad: " ", startingAt: 0) + " │ ")
-                    .foregroundStyle(LogColors.source(source))
+                Text(source.padding(toLength: prefixWidth, withPad: " ", startingAt: 0) + (style == .band ? "  " : " │ "))
+                    .foregroundStyle(sourceColor ?? .secondary)
+                    .fontWeight(style == .band ? .semibold : .regular)
             }
             Text(attributed)
                 .lineLimit(wrap ? nil : 1)
@@ -341,16 +450,28 @@ private struct LogLineRow: View {
         }
         .font(.system(.callout, design: .monospaced))
         .textSelection(.enabled)
-        .padding(.vertical, 1)
-        .padding(.horizontal, 4)
-        .background(rowTint, in: RoundedRectangle(cornerRadius: 3))
+        .padding(.vertical, style == .band && sourceColor != nil ? 2 : 1)
+        .padding(.leading, style == .band && sourceColor != nil ? 8 : 4)
+        .padding(.trailing, 4)
+        .background(alignment: .leading) {
+            if style == .band, let sourceColor {
+                // A tinted band with a solid edge, so each service reads as its own lane
+                // even when lines wrap.
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(levelTint ?? sourceColor.opacity(0.09))
+                    Rectangle().fill(sourceColor).frame(width: 3)
+                }
+            } else if let levelTint {
+                RoundedRectangle(cornerRadius: 3).fill(levelTint)
+            }
+        }
     }
 
-    private var rowTint: Color {
+    private var levelTint: Color? {
         switch line.level {
-        case .error: .red.opacity(0.08)
-        case .warning: .orange.opacity(0.07)
-        default: .clear
+        case .error: .red.opacity(0.12)
+        case .warning: .orange.opacity(0.1)
+        default: nil
         }
     }
 
@@ -363,12 +484,12 @@ private struct LogLineRow: View {
             if let color = run.style.foreground.map(LogColors.color) {
                 part.foregroundColor = color
             } else if !hasColor {
-                // No colours of its own: tint by level so problems stand out.
+                // No colours of its own: tint by level so problems stand out, otherwise by service.
                 switch line.level {
                 case .error: part.foregroundColor = .red
                 case .warning: part.foregroundColor = .orange
                 case .debug, .trace: part.foregroundColor = .secondary
-                default: break
+                default: if style == .text, let sourceColor { part.foregroundColor = sourceColor }
                 }
             }
             if run.style.dim { part.foregroundColor = .secondary }
@@ -377,11 +498,13 @@ private struct LogLineRow: View {
             if run.style.underline { part.underlineStyle = .single }
             result += part
         }
-        if !highlight.isEmpty {
-            var searchStart = result.startIndex
-            while let range = result[searchStart...].range(of: highlight, options: .caseInsensitive) {
-                result[range].backgroundColor = .yellow.opacity(0.45)
-                searchStart = range.upperBound
+        if let matcher {
+            // The attributed text is the line's text run by run, so offsets line up.
+            let characters = result.characters
+            for range in matcher.ranges(in: line.text) where range.upperBound <= characters.count {
+                let lower = characters.index(characters.startIndex, offsetBy: range.lowerBound)
+                let upper = characters.index(lower, offsetBy: range.count)
+                result[lower..<upper].backgroundColor = .yellow.opacity(0.45)
             }
         }
         return result
@@ -416,11 +539,11 @@ enum LogColors {
         }
     }
 
-    private static let sourcePalette: [Color] = [.blue, .green, .purple, .orange, .teal, .pink, .indigo, .mint, .brown, .cyan]
+    /// Far apart in hue; red and orange are left out because they mean errors and warnings.
+    private static let sourcePalette: [Color] = [.blue, .green, .purple, .pink, .teal, .yellow, .indigo, .mint, .brown, .cyan]
 
-    /// A stable colour per service, like `docker compose logs`.
-    static func source(_ name: String) -> Color {
-        let hash = name.unicodeScalars.reduce(UInt32(5381)) { ($0 &<< 5) &+ $0 &+ $1.value }
-        return sourcePalette[Int(hash % UInt32(sourcePalette.count))]
+    /// The colour for the n-th service of a project, like `docker compose logs`.
+    static func source(index: Int) -> Color {
+        sourcePalette[index % sourcePalette.count]
     }
 }

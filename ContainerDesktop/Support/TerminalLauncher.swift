@@ -1,3 +1,4 @@
+import ContainerKit
 import AppKit
 import Foundation
 
@@ -34,7 +35,5 @@ enum TerminalLauncher {
         }
     }
 
-    static func shellQuote(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
+    static func shellQuote(_ value: String) -> String { Shell.quote(value) }
 }

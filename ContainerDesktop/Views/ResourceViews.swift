@@ -115,6 +115,7 @@ struct NetworksView: View {
 struct SystemView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmStop = false
+    @State private var confirmUpdate = false
 
     var body: some View {
         Form {
@@ -131,6 +132,44 @@ struct SystemView: View {
                             .lineLimit(1).truncationMode(.middle)
                     }
                 }
+            }
+            SwiftUI.Section {
+                LabeledContent("container") {
+                    if model.runtimeUpdateAvailable, let latest = model.latestRuntime {
+                        HStack {
+                            Text("\(latest.version) available").foregroundStyle(.orange)
+                            Button("Update…") { confirmUpdate = true }
+                        }
+                    } else if model.latestRuntime != nil {
+                        Text("Up to date").foregroundStyle(.secondary)
+                    } else {
+                        Text("—").foregroundStyle(.secondary)
+                    }
+                }
+                LabeledContent("Socktainer") {
+                    if let version = model.socktainerVersion {
+                        if model.socktainerUpdateAvailable, let latest = model.latestSocktainer {
+                            HStack {
+                                Text("\(version) · \(latest.version) available").foregroundStyle(.orange)
+                                Button("Release Notes") { NSWorkspace.shared.open(latest.url) }
+                            }
+                        } else {
+                            Text(version).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("Not running").foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Updates")
+                    Spacer()
+                    Button("Check Now") { Task { await model.checkForUpdates(force: true) } }
+                        .buttonStyle(.link).font(.caption)
+                }
+            } footer: {
+                Text("Updating the runtime keeps your images, volumes and containers. Socktainer updates through Homebrew: `brew upgrade socktainer`.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             SwiftUI.Section("Usage") {
                 LabeledContent("Containers", value: "\(model.runningCount) running of \(model.containers.count)")
@@ -154,6 +193,12 @@ struct SystemView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("System")
+        .task { await model.checkForUpdates() }
+        .confirmationDialog("Update container to \(model.latestRuntime?.version ?? "")?", isPresented: $confirmUpdate) {
+            Button("Update in Terminal") { model.updateRuntime() }
+        } message: {
+            Text("All running containers stop while Apple's update script installs the new version; it asks for your password. The system starts again afterwards. Images, volumes and containers are kept.")
+        }
         .confirmationDialog("Stop the container system?", isPresented: $confirmStop) {
             Button("Stop", role: .destructive) { Task { await model.stopSystem() } }
         } message: {

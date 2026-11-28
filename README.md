@@ -29,13 +29,14 @@ Container Desktop adds the missing desktop experience. The plan is for it to bec
 | | |
 |---|---|
 | **Containers** | Start, stop, restart, kill and delete. Live CPU and memory in every row. Open a shell in Terminal, or a published port in the browser. |
-| **Compose projects** | Containers from `docker compose` are grouped by project, with totals for CPU, memory and ports. Start a whole project in `depends_on` order, waiting for health checks and one-shot jobs, or stop, restart and delete it in one click. Socktainer's DNS and BuildKit helpers are hidden unless you ask for them. |
+| **Compose projects** | Containers from `docker compose` are grouped by project, with totals for CPU, memory and ports. Start a whole project in `depends_on` order, waiting for health checks and one-shot jobs, or stop and restart it in one click. Deleting a project keeps its volumes unless you choose to remove them too, like `docker compose rm` versus `down -v`. Socktainer's DNS and BuildKit helpers are hidden unless you ask for them. |
 | **Details** | Ports, mounts, environment, labels and IP. Live CPU and memory charts, and raw `inspect`. |
 | **Logs** | ANSI colours, highlighted errors and warnings with counts, level and text filters, and merged logs for a whole project with a coloured prefix per service, like `docker compose logs`. Following pauses when you scroll up. The VM boot log is one click away. Copy or save to a file. |
 | **Run** | Image, name, command, ports, volumes (with a folder picker), environment, CPU and memory limits, network, `--rm` and Rosetta, all validated before anything runs. |
 | **Images** | Pull with live progress, run from an image, delete and prune. Runtime-internal images are hidden by default. |
 | **Volumes and networks** | Create and delete, and see which containers use each one. |
-| **System** | Start and stop the runtime, versions and usage. A first-run guide appears when the CLI is missing. |
+| **AI agents** | A built-in MCP server lets Claude Code and other agents list projects, read logs filtered to errors, diagnose a broken stack, and start, stop, restart or exec, with the same dependency ordering as the buttons. One click adds it to Claude Code; a switch makes it read-only. |
+| **System** | Start and stop the runtime, versions and usage. Checks for new `container` and Socktainer releases, and updates the runtime in place with Apple's update script, keeping images, volumes and containers. A first-run guide appears when the CLI is missing. |
 | **Menu bar** | Running containers with one-click start and stop. |
 
 ## Getting started
@@ -81,6 +82,26 @@ open -n --env CONTAINER_DESKTOP_CLI="$PWD/Scripts/fake-container" "path/to/Conta
 - **A published port (`-p 8080:80`) hangs or resets, but the container's own IP works.** macOS is blocking the runtime's port forwarder. Turn on `container-runtime-linux` under *System Settings → Privacy & Security → Local Network*, then restart the container. See [apple/container#2029](https://github.com/apple/container/issues/2029).
 - **`container system start` sits silently for minutes the first time.** It's downloading the Linux kernel (about 680 MB) without showing progress. Let it finish. If it was interrupted, run `container system kernel set --recommended`.
 
+## AI agents (MCP)
+
+The app's own binary is an [MCP](https://modelcontextprotocol.io) server when launched with `--mcp`, so there's nothing extra to install. Open **AI Agents** in the sidebar and click **Add to Claude Code**, or run:
+
+```sh
+claude mcp add --scope user container-desktop -- '/Applications/Container Desktop.app/Contents/MacOS/Container Desktop' --mcp
+```
+
+Other clients (Claude Desktop, Cursor, VS Code) take the same command and `--mcp` argument in their `mcpServers` settings; the AI Agents page has a copyable snippet. Add `--read-only` to offer only the tools that look.
+
+| Tool | What it does |
+|---|---|
+| `container_status` | Runtime and Socktainer state, versions, container counts |
+| `list_containers` | Compose projects with services, standalone containers, state, ports, dependencies |
+| `get_logs` | Recent lines for a container or a whole project, filtered by level or text, colours removed |
+| `diagnose` | Checks the runtime, Socktainer, stale DNS, stopped services, health checks and recent errors, and suggests fixes |
+| `inspect_container` | Full configuration as JSON |
+| `start`, `stop`, `restart` | A container, or a project in `depends_on` order with health checks |
+| `exec` | Runs a command in a running container, returning exit code and output |
+
 ## Docker compatibility with Socktainer
 
 [Socktainer](https://github.com/socktainer/socktainer) serves a Docker Engine API (v1.51) socket on top of Apple's runtime. With it, `docker run`, `docker compose`, interactive `exec`, `cp`, builds and events work against Apple containers.
@@ -91,7 +112,7 @@ Container Desktop will **manage Socktainer for you**, much as Docker Desktop man
 - [ ] One-click `docker context` setup, plus `DOCKER_HOST` instructions
 - [ ] Health and status of the socket in the app and the menu bar
 - [ ] A version check, because Socktainer pins an exact `container` release
-- [ ] Group containers by Compose project using `com.docker.compose.*` labels
+- [x] Group containers by Compose project using `com.docker.compose.*` labels
 
 When something should be fixed in Socktainer itself, we fix it upstream, following [its contribution guidelines](https://github.com/socktainer/socktainer#contributing-).
 
@@ -100,13 +121,16 @@ When something should be fixed in Socktainer itself, we fix it upstream, followi
 ```
 ContainerDesktop/            SwiftUI app
   App/AppModel.swift         Observable state, polling, actions
-  Views/                     Containers, Images, Volumes, Networks, System, Menu bar
+  App/Main.swift             entry point; `--mcp` runs the MCP server instead of the UI
+  Views/                     Containers, Images, Volumes, Networks, System, AI Agents, Menu bar
 Packages/ContainerKit/       Runtime access, no UI, unit tested
   CLIRunner                  async Process wrapper: timeouts, cancellation, line streaming
   ContainerEngine            the protocol the UI talks to
   CLIContainerEngine         implementation over `container … --format json`
   Models                     version-tolerant decoders for the CLI's JSON
   RunSpec                    form → validated `container run` arguments
+  ProjectController          Compose-aware start/stop/delete, shared by the UI and MCP
+  MCP/                       stdio JSON-RPC server and the container tools
 Scripts/fake-container       fixture-backed CLI for UI development
 ```
 
@@ -126,11 +150,13 @@ Apple's runtime wins on idle footprint, isolation, startup time and per-containe
 
 - [x] Containers, images, volumes, networks, system, menu bar
 - [ ] Socktainer integration (see above)
-- [ ] Compose projects view
+- [x] Compose projects view
+- [x] MCP server for AI agents
 - [ ] `container build` from a Dockerfile
 - [ ] Registry sign-in
 - [ ] Embedded terminal
-- [ ] Notarized DMG releases and auto-updates
+- [x] Notarized releases
+- [ ] Auto-updates for the app itself
 
 ## Contributing
 
